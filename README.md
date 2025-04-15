@@ -1,1 +1,2 @@
 # Loan-Prediction
+In this repository the code for loan prediction is available. A project regarding the predicting of loan amount using variable such as credit, income, and debt-to-income ratio was developed. Using a bayesian network method called hill-climbing, there seemed to be a solidified direction from income to loan amount. Hill-climbing had the best score out of the bayesian networks tested and mean sqaured-error (MSE) was used to test the accuracy of the loan amount predictions to the actual loan amounts reported. 
