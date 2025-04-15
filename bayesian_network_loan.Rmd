@@ -1,0 +1,191 @@
+---
+title: "Bayesian Networks Assignment"
+author: "Benjamin Garcia"
+date: "`r Sys.Date()`"
+output: html_document
+---
+## Data Prep
+```{r }
+#remove.packages('bnlearn')
+#install.packages('bnlearn')
+library(readr)
+loan_data <- read_csv("loan_data.csv")
+```
+
+
+```{r }
+summary(loan_data)
+
+```
+
+
+
+```{r}
+#install.packages('installr')
+#installr::updateR()
+#install.packages('bnlearn')
+#install.packages('rlang', dependencies = T)
+```
+
+```{r}
+#loan_data$Employment_Status <- as.factor(ifelse(loan_data$Employment_Status == 'employed', 1, 0))
+#loan_data$Approval <- as.factor(ifelse(loan_data$Approval == 'Approved' , 1, 0))
+```
+
+For employment status, 1 if employed, 0 if not employed.
+For approval, 1 if approved, 0 if not.
+Ended up not using these columns because aracne does not run with categorical/factor data.
+
+```{r}
+#BiocManager::install('Rgraphviz')
+#install.packages('Rgraphviz')
+library(Rgraphviz)
+```
+## Build Models
+
+Score Based Algorithm - Hill-climbing
+
+Constraint Based Algorithm - Incremental Association with FDR
+
+Hybrid Algorithm - Hybrid HPC 
+
+Local Discovery Algorithm - ARACNE
+
+```{r}
+library(bnlearn)
+model_hc <- bnlearn::hc(loan_data[,2:5])
+model_iamb_fdr <- bnlearn::iamb.fdr(loan_data[,2:5])
+model_h2pc <- bnlearn:::h2pc(loan_data[,2:5])
+model_aracne <- bnlearn::aracne(loan_data[,2:5])
+#bnlearn::graphviz.plot(model_hc)
+```
+
+```{r}
+graphviz.plot(model_hc)
+graphviz.plot(set.arc(model_iamb_fdr, from = 'Loan_Amount', to = 'Income'))
+graphviz.plot(model_h2pc)
+graphviz.plot(model_aracne)
+```
+
+
+
+```{r}
+arcs(model_aracne)
+
+```
+
+
+```{r}
+M_arcs <- arcs(model_hc)
+M_arcs2 <- arcs(model_iamb_fdr)
+M_arcs3 <- arcs(model_h2pc)
+M_arcs4 <- arcs(model_aracne)
+
+```
+
+```{r}
+#M_arcs5 <- M_arcs4
+```
+
+
+```{r}
+
+model_iamb_fdr <- set.arc(
+x = model_iamb_fdr,
+from = M_arcs2[1,1],
+to = M_arcs2[1,2],
+check.cycles = FALSE,
+check.illegal = FALSE
+)
+
+
+model_aracne <- set.arc(
+x = model_aracne,
+from = M_arcs4[1,1],
+to = M_arcs4[1,2],
+)
+
+model_aracne <- set.arc(
+x = model_aracne,
+from = M_arcs4[3,1],
+to = M_arcs4[3,2],
+)
+
+model_aracne <- set.arc(
+x = model_aracne,
+from = M_arcs4[5,1],
+to = M_arcs4[5,2],
+)
+
+```
+
+```{r}
+arcs(model_aracne)
+```
+
+
+
+## Score Models
+
+```{r}
+M_Score <- data.frame(Method = c('hc', 'iamb.fdr', 'h2pc', 'aracne'), Score = c(NA, NA, NA, NA))
+```
+
+
+```{r}
+M_Score[1,2] <- score(x = model_hc, data = loan_data[,2:5], type = 'bic-g')
+M_Score[2,2] <- score(x = model_iamb_fdr, data = loan_data[,2:5], type = 'bic-g')
+M_Score[3,2] <- score(x = model_h2pc, data = loan_data[,2:5], type = 'bic-g')
+M_Score[4,2] <- score(x = model_aracne, data = loan_data[,2:5], type = 'bic-g')
+```
+
+
+
+ The network-score I selected was 'bic-g'. Since I had a gaussian bayesian network with just continuous variables (income, Credit_Score, Loan_Amount, and DTI_Ratio) I chose one of the gaussian scoring methods. I went with bic over aic, loglik and other scoring methods because I have relatively few variables, a somewhat large amount of observations (24,000), and am looking for the simplest model. BIC gives me the best chance to select the best simplest model given my data. 
+ 
+ 
+```{r}
+M_Score <- M_Score[order(M_Score$Score, decreasing = T),]
+M_Score
+```
+ 
+ According to the table hc or hill-climbing algorithm which is a score-based algorithm did the best. Hc is the method with the greatest score value or value that is closest to zero since they are all negative. 
+ 
+## Visualize final model 
+ 
+```{r}
+graphviz.plot(model_hc)
+strength_loan <- arc.strength(
+x = model_hc,
+data = loan_data[,2:5])
+strength.plot(x = model_hc, strength = strength_loan)
+```
+ 
+ 
+## Predict and Evaluate Fit
+
+```{r}
+
+bn_loan <- bn.fit(
+x = model_hc,
+data = loan_data[,2:5]
+)
+
+```
+
+
+
+```{r}
+bn_loan_pred <- predict(
+object = bn_loan,
+data = loan_data[,2:5],
+node = colnames(loan_data[,4]))
+```
+
+Mean Squared-Error (MSE)
+
+```{r}
+mean((bn_loan_pred - loan_data$Loan_Amount )^2)
+```
+
+The high MSE value indicates that the bayesian network model may not be best for this data. We must be aware of the extremely low score values for the different bayesian network methods. These values may indicate that the variables do not have causal or correlated relationship. While there may be some kind of relationship, it is hard for the bayesian methods to use the limited data to discover it. I would not recommend a bayesian network over a tradition linear regression or other machine learning methods for this data. Despite, the large amount of observations, the limiting factor may be the use of 4 continuous variables since the other 2 binary variables could not be used with the aracne method.
