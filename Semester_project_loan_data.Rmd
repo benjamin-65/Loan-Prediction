@@ -1,0 +1,595 @@
+---
+title: "Semester Project STA 6704"
+author: "Benjamin Garcia"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Data Prep
+
+```{r }
+library(readr)
+loan_data <- read_csv("loan_data.csv")
+```
+
+
+Set binary values
+```{r }
+loan_data$Employment_Status <- as.factor(ifelse(loan_data$Employment_Status == 'employed', 1, 0))
+loan_data$Approval <- as.factor(ifelse(loan_data$Approval == 'Approved' , 1, 0))
+```
+
+For employment status, 1 if employed, 0 if not employed.
+For approval, 1 if approved, 0 if not.
+
+```{r }
+table(loan_data$Approval)
+(2*3933)/20067
+```
+balance classes
+
+```{r}
+set.seed(8675309)
+ind <- sample(1:20067, 3933, replace = F)
+```
+
+
+```{r}
+not_approved <- loan_data[loan_data$Approval == 0,]
+not_approved <- not_approved[ind,]
+approved <- loan_data[loan_data$Approval == 1,]
+loan2 <- rbind(not_approved, approved)
+```
+
+
+scale numeric data
+```{r}
+loan3 <- cbind(loan2[,1],scale(loan2[,2:5]),loan2[,6:7])
+```
+
+## Visualizations and Variable Analysis
+
+```{r}
+library(ggplot2)
+corrplot::corrplot(cor(loan3[,2:5]))
+
+```
+
+```{r}
+plot(hclust(dist(t(loan3[,2:5]))))
+```
+
+```{r}
+ggplot(loan2, aes(fill = Approval, y = Income)) + geom_boxplot()
+
+ggplot(loan2, aes(fill = Approval, y = Loan_Amount)) + geom_boxplot()
+
+ggplot(loan2, aes(fill = Approval, y = Credit_Score)) + geom_boxplot()
+
+ggplot(loan2, aes(fill = Approval, y = DTI_Ratio)) + geom_boxplot()
+```
+pca
+
+```{r}
+data_pca <- princomp(loan3[,2:5])
+```
+
+```{r}
+print(summary(data_pca))
+print(summary(prcomp(loan3[,2:5])))
+```
+
+```{r}
+plot(data_pca$scores[,1], data_pca$scores[,2], xlab = "PC1", ylab = "PC2", main = "First vs. Second PC")
+```
+
+```{r}
+library(factoextra)
+par(mfrow = c(1,1))
+fviz_eig(data_pca, addlabels = TRUE)
+```
+
+
+```{r}
+#fviz_pca_var(data_pca, col.var = "black")
+
+#fviz_cos2(data_pca, choice = "var", axes = 1:2)
+
+fviz_pca_var(data_pca, col.var = "cos2",
+             gradient.cols = c("black", "orange", "green"),
+             repel = TRUE)
+```
+
+```{r}
+par(las = 3)
+#barplot(data_pca$ $rotation[,"PC1"])
+barplot(prcomp(loan3[,2:5])$rotation[,"PC1"])
+barplot(prcomp(loan3[,2:5])$rotation[,"PC2"])
+```
+## Supervised Learning
+
+logistic regression
+
+```{r}
+set.seed(8675309)
+ind <- sample(1:7866, 7866*.7, replace = F)
+train.df <- loan3[ind,]
+holdout.df <- loan3[-ind,]
+
+
+```
+
+
+```{r}
+logmod1 <- glm(formula = Approval ~., family = binomial(link = "logit"), data = train.df[,2:7])
+
+summary(logmod1)
+```
+```{r}
+step_mod_both <- MASS::stepAIC(
+  object = logmod1,
+  direction = "both"
+)
+
+step_mod_both
+```
+leave all variables in
+
+```{r}
+pred <- predict(step_mod_both, holdout.df[,2:7])
+
+prob.predictions <- 1 / (1 + exp(-pred))
+
+caret::confusionMatrix(factor(ifelse(prob.predictions > .5, 1, 0)), factor(holdout.df$Approval ))
+```
+```{r}
+# ROC curve
+library(ROCR)
+predob <- prediction(ifelse(prob.predictions > .5, 1, 0), holdout.df$Approval )
+perf <- performance(predob, "tpr", "fpr")
+perf.df <- data.frame(tpr = perf@x.values[[1]],
+                      fpr = perf@y.values[[1]])
+ggplot2::ggplot(perf.df, aes(x = tpr, y = fpr))+
+  geom_line()+
+  geom_segment(aes(x=0, y=0, xend=1, yend=1), color = "gray", linetype = "dashed")+
+  labs(x = "1-Specificity", y = "Sensitivity")
+
+performance(predob, measure = "auc")@y.values[[1]]
+```
+
+
+random forest
+
+```{r}
+library(randomForest)
+rand_for <- randomForest(Approval ~ ., data = train.df[,2:7])
+
+```
+
+
+```{r}
+varImpPlot(rand_for)
+```
+
+```{r}
+rf.pred <- predict(rand_for, holdout.df[,2:7], type = "class")
+caret::confusionMatrix(as.factor(rf.pred), as.factor(holdout.df$Approval))
+```
+
+```{r}
+
+
+```
+
+```{r}
+rownames(holdout.df) <- 1:nrow(holdout.df)
+```
+
+
+
+```{r}
+#prob_bt2 <- predict(rand_for, holdout.df[,2:7])
+#predob2 <- prediction(prob_bt2, holdout.df$Approval )
+#perf2 <- performance(predob2, "tpr", "fpr")
+#perf.df2 <- data.frame(tpr = perf2@x.values[[1]],
+#                      fpr = perf2@y.values[[1]])
+```
+## Unsupervised Learning
+
+bayesian
+
+```{r}
+library(Rgraphviz)
+library(bnlearn)
+model_hc <- bnlearn::hc(loan3[,2:5])
+```
+
+
+```{r}
+graphviz.plot(model_hc)
+```
+
+```{r}
+score(x = model_hc, data = loan_data[,2:5], type = 'bic-g')
+```
+```{r}
+#graphviz.plot(model_hc)
+strength_loan <- arc.strength(
+x = model_hc,
+data = loan3[,2:5])
+strength.plot(x = model_hc, strength = strength_loan)
+```
+```{r}
+bn_loan <- bn.fit(
+x = model_hc,
+data = loan3[,2:5]
+)
+```
+
+```{r}
+bn_loan_pred <- predict(
+object = bn_loan,
+data = loan3[,2:5],
+node = colnames(loan3)[4])
+```
+
+```{r}
+colnames(loan3)[4]
+```
+
+
+```{r}
+mean((bn_loan_pred - loan3$Loan_Amount )^2)
+```
+clustering
+
+```{r}
+library(cluster)
+library(factoextra)
+
+#create plot of number of clusters vs total within sum of squares
+fviz_nbclust(loan3[,2:5], kmeans, method = "wss")
+```
+
+```{r}
+kmeans_loan <- kmeans(loan3[,2:5], centers = 2)
+
+kmeans_loan
+```
+
+```{r}
+kmeans_loan5 <- kmeans(loan3[,2:5], centers = 5)
+
+kmeans_loan5
+```
+
+```{r}
+loan5 <- cbind(loan3, kmeans_loan5$cluster)
+
+table(loan5$Approval , loan5$`kmeans_loan5$cluster`)
+```
+
+```{r}
+loan22 <- cbind(loan3, kmeans_loan$cluster)
+table(loan22$Approval, loan22$`kmeans_loan$cluster`)
+```
+
+
+
+## Bag of Words
+
+```{r}
+loan3$Text <- stringr::str_to_lower(loan3$Text)
+
+```
+
+
+```{r}
+loan3$Text <- qdapRegex::rm_twitter_url(
+loan3$Text,
+replacement = " ",
+clean = TRUE
+)
+
+```
+
+
+```{r}
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "ã",
+replacement = "a"
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "š",
+replacement = "s"
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "â",
+replacement = "a"
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "¿",
+replacement = "?"
+)
+```
+
+
+```{r}
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = " i'm ",
+replacement = " i am "
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "'re ",
+replacement = " are "
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "'t ",
+replacement = " not "
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "'ve ",
+replacement = " have "
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "'ll ",
+replacement = " will "
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = " doesn't ",
+replacement = " does not "
+)
+```
+
+
+```{r}
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text ,
+pattern = "[:punct:]",
+replacement = " "
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "[:digit:]",
+replacement = " "
+)
+loan3$Text <- stringr::str_replace_all(
+string = loan3$Text,
+pattern = "\\W",
+replacement = " "
+) 
+
+
+```
+
+
+
+```{r}
+loan3$Text <- tm::removeWords(
+x = loan3$Text,
+words = tm::stopwords(kind = "SMART")
+)
+loan3$Text <- tm::removeWords(
+x = loan3$Text,
+words = tm::stopwords(kind = "english")
+)
+loan3$Text <- tm::removeWords(
+x = loan3$Text,
+words = qdapDictionaries::Top200Words
+)
+```
+
+
+
+```{r}
+loan3$Text <- tm::removeWords(
+x = loan3$Text,
+words = c('loan', 'funds', 'money', 'financial', 'assistance', 'support', 'pay', 'purchase', 'buy', 'cover',
+          'payment')
+)
+```
+
+
+```{r}
+loan3$Text <- trimws(stringr::str_replace_all(
+string = loan3$Text,
+pattern = "\\s+",
+replacement = " "
+))
+```
+
+
+```{r}
+strsplit_text <- strsplit(loan3$Text," ")
+dictionary_text <- sort(unique(unlist(strsplit_text)))
+strsplit_text <- lapply(
+X = strsplit_text,
+FUN = tm::stemDocument
+)
+#strsplit_tweets <- lapply(
+# X = strsplit_tweets,
+# FUN = tm::stemCompletion,
+# dictionary = dictionary_tweets
+#)
+strsplit_text <- lapply(
+X = strsplit_text,
+FUN = paste,
+collapse = " "
+)
+loan3$text2 <- unlist(strsplit_text)
+```
+
+
+```{r}
+Corpus_text <- tm::VCorpus(tm::VectorSource(loan3$text2))
+
+DocumentTermMatrix_text <- tm::DocumentTermMatrix(Corpus_text)
+
+DocumentTermMatrix_text <- tm::removeSparseTerms(
+DocumentTermMatrix_text,
+0.995
+)
+
+M <- as.matrix(DocumentTermMatrix_text)
+dim(M)
+```
+
+```{r}
+term_frequency <- data.frame(
+Term = colnames(M),
+Frequency = colSums(M),
+stringsAsFactors = FALSE
+)
+term_frequency <- term_frequency[order(term_frequency$Frequency),]
+
+wordcloud::wordcloud(
+words = term_frequency$Term,
+freq = term_frequency$Frequency,
+max.words = 30,
+random.order = FALSE,
+colors = viridis::viridis(100)
+)
+
+```
+
+word cloud for all loans
+
+```{r}
+approved_wc <- as.data.frame(loan3[loan3$Approval == 1, 8])
+```
+
+
+```{r}
+app_Corpus_text <- tm::VCorpus(tm::VectorSource(approved_wc$`loan3[loan3$Approval == 1, 8]`))
+
+app_DocumentTermMatrix_text <- tm::DocumentTermMatrix(app_Corpus_text)
+
+app_DocumentTermMatrix_text <- tm::removeSparseTerms(
+app_DocumentTermMatrix_text,
+0.995
+)
+
+app_M <- as.matrix(app_DocumentTermMatrix_text)
+dim(app_M)
+```
+
+```{r}
+app_term_frequency <- data.frame(
+Term = colnames(app_M),
+Frequency = colSums(app_M),
+stringsAsFactors = FALSE
+)
+app_term_frequency <- app_term_frequency[order(app_term_frequency$Frequency),]
+
+wordcloud::wordcloud(
+words = app_term_frequency$Term,
+freq = app_term_frequency$Frequency,
+max.words = 30,
+random.order = FALSE,
+colors = viridis::viridis(100)
+)
+```
+word cloud for loans that were approved
+
+```{r}
+napproved_wc <- as.data.frame(loan3[loan3$Approval == 0, 8])
+```
+
+
+```{r}
+napp_Corpus_text <- tm::VCorpus(tm::VectorSource(napproved_wc$`loan3[loan3$Approval == 0, 8]`))
+
+napp_DocumentTermMatrix_text <- tm::DocumentTermMatrix(napp_Corpus_text)
+
+napp_DocumentTermMatrix_text <- tm::removeSparseTerms(
+napp_DocumentTermMatrix_text,
+0.995
+)
+
+napp_M <- as.matrix(napp_DocumentTermMatrix_text)
+dim(napp_M)
+```
+```{r}
+napp_term_frequency <- data.frame(
+Term = colnames(napp_M),
+Frequency = colSums(napp_M),
+stringsAsFactors = FALSE
+)
+napp_term_frequency <- napp_term_frequency[order(napp_term_frequency$Frequency),]
+
+wordcloud::wordcloud(
+words = napp_term_frequency$Term,
+freq = napp_term_frequency$Frequency,
+max.words = 30,
+random.order = FALSE,
+colors = viridis::viridis(100)
+)
+```
+
+```{r}
+app_term_frequency2 <- app_term_frequency[order(rownames(app_term_frequency)),]
+napp_term_frequency2 <- napp_term_frequency[order(rownames(napp_term_frequency)),]
+tot_tf <- cbind(app_term_frequency2,napp_term_frequency2$Frequency)
+colnames(tot_tf)[2] <- c('approved_tf')
+colnames(tot_tf)[3] <- c('not_approved_tf')
+
+```
+
+
+```{r}
+tot_tf <- tot_tf[order(-tot_tf$approved_tf),]
+```
+
+
+```{r}
+plotrix::pyramid.plot(
+lx = tot_tf[1:20,3],
+rx = tot_tf[1:20,2],
+labels = rownames(tot_tf)[1:20],
+top.labels = c("Not Approved","","Approved"),
+lxcol = "red",
+rxcol = "blue",
+unit="count",
+gap = 100
+)
+
+
+
+```
+
+```{r}
+#rep(tot_tf$Term, 2)
+```
+
+
+```{r}
+tim <- tot_tf[1:20,]
+total_tf1 <- data.frame(Term = tim$Term, Status = c(rep('Approved', 40)),
+                       Count = tim$approved_tf)
+total_tf2 <- data.frame(Term = tim$Term, Status = c(rep('Not Approved', 40)),
+                       Count = tim$not_approved_tf)
+
+total_tf3 <- rbind(total_tf1, total_tf2)
+```
+
+
+```{r}
+library(ggplot2)
+ggplot(total_tf3, aes(fill = Status, y=Count, x=reorder(Term, Count))) + 
+    geom_bar(position="dodge", stat="identity") +
+  coord_flip() +
+  scale_fill_manual(values=c( 
+                              "darkblue", 
+                             "red")) 
+```
+
